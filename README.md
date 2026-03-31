@@ -107,7 +107,10 @@ User Question
 ├── Dockerfile
 ├── requirements.txt
 ├── main.py                     # FastAPI entry point
-│
+├── .env                        # Environment variables
+|
+|── dags/
+│   └── ingestion_dag.py         # Airflow DAG for scheduled data ingestion
 ├── rag/
 │   ├── llm_setup.py            # Global LLM + embedding config
 │   ├── query_rewriter.py       # Stage 1 — query optimization
