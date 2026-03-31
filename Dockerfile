@@ -11,4 +11,4 @@ COPY . .
 EXPOSE 8080
 
 # Define the command to run the application
-CMD ["fastapi", "run", "main.py", "--port", "8080", "--host", "0.0.0.0"]
+CMD ["fastapi", "run", "rag/api.py", "--port", "8080", "--host", "0.0.0.0"]
