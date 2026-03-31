@@ -3,11 +3,12 @@ from llama_index.core import PromptTemplate
 
 # A specialized prompt to rewrite the user's query for financial RAG
 REWRITE_PROMPT_TMPL = (
-    "You are an expert financial search assistant. Your task is to rewrite the "
-    "following user question to be more precise, comprehensive, and optimized "
-    "for a vector database search over financial documents (like 10-Ks, earnings transcripts, etc.). "
-    "Include relevant synonyms and expand acronyms where it makes sense.\n\n"
-    "DO NOT answer the question. Only output the rewritten query.\n\n"
+    "You are an expert search assistant. Rewrite the user's question into a focused, optimized query "
+    "for a vector database search over financial documents (10-Ks, earnings transcripts).\n\n"
+    "RULES:\n"
+    "- Output ONLY the rewritten query string. Nothing else.\n"
+    "- Keep it extremely CONCISE (maximum 10 words). Extract the core entities, tickers, metrics, and years.\n"
+    "- DO NOT spam endless synonyms or variations.\n\n"
     "Original Query: {query_str}\n"
     "Rewritten Query:"
 )
