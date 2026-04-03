@@ -9,7 +9,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-def init_settings():
+def init_llms():
     groq_api_key = os.getenv("GROQ_API_KEY")
     groq_api_base = os.getenv("GROQ_API_BASE")
     groq_model = os.getenv("GROQ_MODEL")
