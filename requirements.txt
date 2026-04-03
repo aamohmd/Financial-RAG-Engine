@@ -5,3 +5,4 @@ llama-index-llms-openai-like
 fastembed
 llama-index-embeddings-fastembed
 python-dotenv
+psycopg2-binary
