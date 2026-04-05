@@ -1,4 +1,4 @@
-from llama_index.llms.openai import OpenAI
+from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.core import Settings
 from dotenv import load_dotenv
@@ -26,10 +26,11 @@ def init_llms():
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    Settings.llm = OpenAI(
-        model=OPENROUTER_MODEL,
-        api_key=OPENROUTER_KEY,
-        api_base=OPENROUTER_API_BASE
+    Settings.llm = OpenAILike(
+        model=openrouter_model,
+        api_key=openrouter_api_key,
+        api_base=openrouter_api_base,
+        is_chat_model=True
     )
 
 
