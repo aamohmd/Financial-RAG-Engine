@@ -3,6 +3,6 @@ uvicorn
 llama-index-core
 llama-index-llms-openai-like
 fastembed
-llama-index-embeddings-fastembed
+llama-index-embeddings-openai
 python-dotenv
 psycopg2-binary
