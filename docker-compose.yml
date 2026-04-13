@@ -9,19 +9,27 @@ services:
     volumes:
       - .:/app
     command: ["fastapi", "dev", "rag/api.py", "--port", "8080", "--host", "0.0.0.0"]
+    depends_on:
+      db:
+        condition: service_healthy
 
   db:
-    image: pgvector/pgvector:pg17
+    image: paradedb/paradedb:latest
     container_name: postgres_db
     environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
-      POSTGRES_DB: mydatabase
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
 
 volumes:
   postgres_data:
