@@ -11,7 +11,7 @@ services:
     command: ["fastapi", "dev", "rag/api.py", "--port", "8080", "--host", "0.0.0.0"]
 
   db:
-    image: postgres:latest
+    image: pgvector/pgvector:pg17
     container_name: postgres_db
     environment:
       POSTGRES_USER: myuser
@@ -20,7 +20,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
 volumes:
   postgres_data:

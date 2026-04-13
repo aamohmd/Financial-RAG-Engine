@@ -6,3 +6,5 @@ fastembed
 llama-index-embeddings-openai
 python-dotenv
 psycopg2-binary
+sqlalchemy
+pgvector
