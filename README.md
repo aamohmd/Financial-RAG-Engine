@@ -2,7 +2,9 @@
 
 A production-grade Retrieval-Augmented Generation pipeline purpose-built for financial document Q&A. Ask natural-language questions about SEC filings, earnings reports, and financial news — the engine retrieves the most relevant passages from a pgvector-powered document store and synthesizes precise, grounded answers.
 
-**This is not a wrapper around an API.** The pipeline implements six distinct NLP stages, each solving a specific retrieval or ranking problem, orchestrated end-to-end in Python.
+**This is not a wrapper around an API.** The pipeline implements a multi-stage NLP pipeline, each stage solving a specific retrieval or ranking problem, orchestrated end-to-end in Python.
+
+> 🚧 **Work in Progress** — Stages 1–3 of the query pipeline are fully implemented. Ingestion, reranking, synthesis, and Airflow orchestration are on the roadmap.
 
 ---
 
@@ -12,7 +14,7 @@ User Question
      │
      ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Stage 1 · Query Rewriting                              │
+│  Stage 1 · Query Rewriting                     ✅ DONE  │
 │  LLM rewrites conversational questions into precise     │
 │  financial search queries with tickers, fiscal periods, │
 │  and domain terminology (revenue, EPS, gross margin)    │
@@ -21,7 +23,7 @@ User Question
                      ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Stage 2 · HyDE (Hypothetical Document Embedding)       │
-│  LLM generates a hypothetical SEC-style passage that    │
+│  LLM generates a hypothetical SEC-style passage that    │ ✅ DONE
 │  would answer the query. This passage is embedded       │
 │  instead of the question — achieving ~0.85-0.92 cosine  │
 │  similarity vs ~0.60-0.72 for raw question embedding    │
@@ -31,17 +33,17 @@ User Question
 ┌─────────────────────────────────────────────────────────┐
 │  Stage 3 · Hybrid Retrieval (Vector + BM25 + RRF)       │
 │  Runs two parallel searches:                            │
-│    • pgvector cosine similarity (HNSW index, <=>) on    │
-│      the HyDE embedding                                 │
-│    • PostgreSQL full-text search (ts_rank + @@) on the  │
+│    • pgvector cosine similarity (<=>)  on the HyDE      │ ✅ DONE
+│      embedding                                          │
+│    • ParadeDB BM25 full-text search (@@@) on the        │
 │      rewritten query text                               │
 │  Merges both ranked lists via Reciprocal Rank Fusion    │
-│  (k=60) → 20 candidates                                 │
+│  (k=60) → top-k candidates                              │
 └────────────────────┬────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Stage 4 · Sentence-Window Expansion                    │
+│  Stage 4 · Sentence-Window Expansion           🔜 TODO  │
 │  Each retrieved sentence is replaced with its ±2        │
 │  surrounding sentences (stored at ingestion time).      │
 │  Gives the reranker and LLM full paragraph context      │
@@ -49,19 +51,19 @@ User Question
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Stage 5 · Cross-Encoder Reranking                      │
-│  ms-marco-MiniLM-L-6-v2 scores each candidate against   │
+│  Stage 5 · Cross-Encoder Reranking             🔜 TODO  │
+│  ms-marco-MiniLM-L-6-v2 scores each candidate against  │
 │  the ORIGINAL question (not the rewritten query).       │
 └────────────────────┬────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Stage 6 · LLM Synthesis                                │
-│  Refines top 5 passages into a structured answer.       │
+│  Stage 6 · LLM Synthesis                       🔜 TODO  │
+│  Refines top passages into a structured answer.         │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### ⚙️ Data Ingestion Pipeline (Orchestration)
+### ⚙️ Data Ingestion Pipeline (Planned)
 ```
   ┌───────────────┐      ┌─────────────────┐      ┌───────────────┐
   │  SEC Filings  │      │  Earnings Calls │      │ Financial News│
@@ -69,13 +71,13 @@ User Question
           │                       │                       │
           ▼                       ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                Apache Airflow (DAG Orchestrator)                │
+│                Apache Airflow (DAG Orchestrator)     🔜 TODO    │
 │  • Scheduling  • Retries  • Monitoring  • Parallel Ingestion    │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-                                ▼
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  FastAPI /rag/ingest Endpoint                   │
+│                  FastAPI /rag/ingest Endpoint        🔜 TODO    │
 │  • PDF Parsing  • Text Chunking  • Sentence-Window Processing   │
 │  • Embedding Generation  • pgvector Storage                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -89,12 +91,12 @@ User Question
 |---|---|---|
 | **API Framework** | FastAPI + Uvicorn | Async, auto-generated docs, Pydantic validation |
 | **Vector Database** | PostgreSQL + pgvector | HNSW indexing, cosine distance operator (`<=>`), co-located with relational data |
-| **Full-Text Search** | PostgreSQL `tsvector` + `ts_rank` | BM25-equivalent ranking using native Postgres (no external search engine) |
-| **RAG Orchestration** | LlamaIndex Core | Document parsing, node management, metadata pipelines |
-| **LLM** | Groq API (Llama 3.1 8B) | Ultra-fast inference (~100ms), generous free tier |
-| **Embeddings** | HuggingFace `BAAI/bge-small-en-v1.5` | Runs locally on CPU, 384-dim vectors, free |
-| **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 23M param cross-encoder trained on MS MARCO |
-| **Orchestration** | Apache Airflow | Orchestrating ingestion pipelines (SEC, news, earnings) |
+| **Full-Text Search** | ParadeDB BM25 (`@@@` operator) | Production-grade BM25 ranking built directly into Postgres — no external search engine |
+| **RAG Orchestration** | LlamaIndex Core | Query transforms, prompt templates, embedding pipelines |
+| **LLM** | OpenRouter API (configurable free-tier model) | Top free reasoning model for finance on OpenRouter |
+| **Embeddings** | OpenRouter API (`nvidia/llama-nemotron-embed-vl-1b-v2:free`) | Cloud-based embedding generation, 4096-dim vectors, free tier |
+| **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` *(planned)* | 23M param cross-encoder trained on MS MARCO |
+| **Orchestration** | Apache Airflow *(planned)* | Orchestrating ingestion pipelines (SEC, news, earnings) |
 | **Containerization** | Docker + Docker Compose | One-command deployment |
 
 ---
@@ -103,27 +105,25 @@ User Question
 
 ```
 .
-├── docker-compose.yml          # Postgres (pgvector) + Backend
-├── Dockerfile
+├── docker-compose.yml          # ParadeDB (pgvector + BM25) + FastAPI backend
+├── Dockerfile                  # Python 3.11 slim image
+├── Makefile                    # Shortcuts: make up, make build, make clean
 ├── requirements.txt
-├── main.py                     # FastAPI entry point
-├── .env                        # Environment variables
-|
-|── dags/
-│   └── ingestion_dag.py         # Airflow DAG for scheduled data ingestion
+├── main.py                     # (placeholder)
+├── .env.example                # Environment variable template
+│
+├── dags/                       # (planned) Airflow DAGs for ingestion
+│
 ├── rag/
-│   ├── llm_setup.py            # Global LLM + embedding config
+│   ├── llm_setup.py            # LLM + embedding init via OpenRouter
 │   ├── query_rewriter.py       # Stage 1 — query optimization
 │   ├── hyde.py                 # Stage 2 — hypothetical document embedding
 │   ├── hybrid_search.py        # Stage 3 — vector + BM25 + RRF fusion
-│   ├── ingestion.py            # Sentence-window document ingestion
-│   ├── reranker.py             # Stage 5 — cross-encoder reranking
-│   ├── query_engine.py         # Full pipeline orchestrator
-│   └── api.py                  # REST endpoints (/rag/query, /rag/ingest)
+│   ├── db_setup.py             # SQLAlchemy engine, table schema, BM25 index init
+│   └── api.py                  # FastAPI app + REST endpoints
 │
 └── db/
-    ├── init.sql                # Schema: document_chunks + pgvector indexes
-    └── database.py             # SQLAlchemy engine + session
+    └── init.sql                # Schema: financial_documents + pgvector extension
 ```
 
 ---
@@ -133,25 +133,24 @@ User Question
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE document_chunks (
-    id          SERIAL PRIMARY KEY,
-    doc_id      TEXT NOT NULL,
-    source      TEXT NOT NULL,          -- "sec_10k", "earnings", "news"
-    ticker      TEXT,                   -- filterable by company
-    content     TEXT NOT NULL,
-    metadata    JSONB,                  -- sentence window stored here
-    embedding   vector(384),
-    ts_content  tsvector GENERATED ALWAYS AS
-                (to_tsvector('english', content)) STORED,
-    created_at  TIMESTAMP DEFAULT NOW()
+CREATE TABLE financial_documents (
+    id               SERIAL PRIMARY KEY,
+    document_title   VARCHAR(255) NOT NULL,
+    content          TEXT NOT NULL,
+    embedding        halfvec(4096),
+    company_ticker   VARCHAR(10),
+    report_date      DATE,
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- HNSW index for fast approximate nearest neighbor search
-CREATE INDEX ON document_chunks USING hnsw (embedding vector_cosine_ops);
-
--- GIN index for full-text BM25 search
-CREATE INDEX ON document_chunks USING gin (ts_content);
+-- BM25 index for full-text search (ParadeDB)
+CREATE INDEX documents_bm25
+    ON financial_documents
+    USING bm25 (id, content)
+    WITH (key_field = 'id');
 ```
+
+> **Note:** The database runs on [ParadeDB](https://www.paradedb.com/) — a Postgres-native search engine that provides real BM25 ranking via the `@@@` operator, eliminating the need for a separate Elasticsearch/Solr instance.
 
 ---
 
@@ -159,23 +158,20 @@ CREATE INDEX ON document_chunks USING gin (ts_content);
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/yourusername/advanced-rag-financial-qa.git
-cd advanced-rag-financial-qa
+git clone https://github.com/aamohmd/Financial-RAG-Engine.git
+cd Financial-RAG-Engine
 cp .env.example .env
-# Add your GROQ_API_KEY
+# Add your OPENROUTER_API_KEY
 
-# 2. Start services
-docker compose up -d
+# 2. Start services (ParadeDB + FastAPI)
+make build
+# or: docker compose up --build
 
-# 3. Ingest documents
-curl -X POST http://localhost:8000/rag/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"texts": ["Apple reported Q4 revenue of $89.5B..."], "ticker": "AAPL"}'
+# 3. Test the pipeline (query rewrite → HyDE → hybrid search)
+curl -X POST http://localhost:8080/test
 
-# 4. Ask questions
-curl -X POST http://localhost:8000/rag/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What was Apple revenue last quarter?", "ticker": "AAPL"}'
+# 4. Health check
+curl http://localhost:8080/docs   # Swagger UI
 ```
 
 ---
@@ -188,46 +184,44 @@ Raw questions like *"How did Apple do last quarter?"* have low cosine similarity
 ### Why hybrid search instead of vector-only?
 Vector search excels at semantic similarity but misses exact financial terms (ticker symbols, specific dollar amounts). BM25 catches these. Reciprocal Rank Fusion merges both ranked lists without tuning weights.
 
-### Why rerank against the original question?
-The rewritten query is optimized for *retrieval* (maximize recall). But the user's actual intent might be subtly different. The cross-encoder scores each candidate against the *original* question to ensure the final answer addresses what was actually asked.
+### Why ParadeDB instead of PostgreSQL tsvector?
+ParadeDB provides true BM25 scoring natively inside Postgres via the `@@@` operator, matching the ranking quality of dedicated search engines. Standard `tsvector` + `ts_rank` uses a simpler TF-IDF-like metric that lacks BM25's term-frequency saturation and document-length normalization.
 
-### Why sentence-window ingestion?
+### Why OpenRouter?
+OpenRouter provides access to top-tier LLMs and embedding models through a single API with generous free tiers. This keeps the project zero-cost for development while allowing easy model switching (just change an env var).
+
+### Why sentence-window ingestion? *(planned)*
 Embedding individual sentences gives precise retrieval. But a single sentence lacks context for the reranker and LLM. Sentence-window stores ±2 surrounding sentences in metadata, swapped in at retrieval time — best of both worlds.
 
-### Why Airflow for orchestration?
-Financial data is high-frequency and multi-source. Apache Airflow ensures data freshness by automating the ingestion of thousands of SEC filings and earnings transcripts. It provides built-in retries for network failures and a visual dashboard for monitoring pipeline health.
+### Why rerank against the original question? *(planned)*
+The rewritten query is optimized for *retrieval* (maximize recall). But the user's actual intent might be subtly different. The cross-encoder scores each candidate against the *original* question to ensure the final answer addresses what was actually asked.
 
 ---
 
 ## 📝 API Reference
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/rag/health` | GET | Health check |
-| `/rag/query` | POST | Run full 6-stage pipeline on a question |
-| `/rag/ingest` | POST | Ingest documents into pgvector (sentence-window parsed) |
+| Endpoint | Method | Status | Description |
+|---|---|---|---|
+| `/docs` | GET | ✅ | Swagger UI |
+| `/test` | POST | ✅ | End-to-end test: rewrite → HyDE → hybrid search |
+| `/rag/query` | POST | 🔜 | Run full pipeline on a question |
+| `/rag/ingest` | POST | 🔜 | Ingest documents into pgvector |
 
-### POST `/rag/query`
-```json
-{
-  "question": "What is Apple's gross margin trend?",
-  "ticker": "AAPL"
-}
-```
-
-### POST `/rag/ingest`
-```json
-{
-  "texts": ["Full text of SEC 10-K filing...", "Earnings press release..."],
-  "ticker": "AAPL",
-  "source": "sec_10k"
-}
-```
+### POST `/test` (currently working)
+Runs the implemented pipeline stages end-to-end with a hardcoded NVDA query for testing.
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] **Apache Airflow Integration**: Orchestrate data ingestion pipelines for automated SEC filing and news collection.
-- [ ] **Multi-Vector Retrieval**: Support for table and image embeddings in financial reports.
-- [ ] **Latency Optimization**: Implement KV caching and model quantization for faster synthesis.
+- [x] **Query Rewriting** — LLM-powered query optimization for financial search
+- [x] **HyDE** — Hypothetical Document Embedding for improved vector retrieval
+- [x] **Hybrid Search** — Vector (pgvector) + BM25 (ParadeDB) with RRF fusion
+- [x] **Database Setup** — ParadeDB with pgvector extension, SQLAlchemy ORM
+- [x] **Docker Deployment** — One-command setup with Docker Compose
+- [ ] **Document Ingestion Pipeline** — PDF parsing, sentence-window chunking, embedding + storage
+- [ ] **Cross-Encoder Reranking** — ms-marco-MiniLM-L-6-v2 for precision re-scoring
+- [ ] **LLM Synthesis** — Structured answer generation from top passages
+- [ ] **Full `/rag/query` Endpoint** — Wire all 6 stages into a single API call
+- [ ] **Apache Airflow Integration** — Orchestrate automated SEC filing and news ingestion
+- [ ] **Multi-Vector Retrieval** — Table and image embeddings in financial reports
