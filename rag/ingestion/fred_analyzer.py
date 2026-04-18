@@ -16,6 +16,7 @@ import statistics
 import logging
 import requests
 from pathlib import Path
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from .models import FinancialDoc
@@ -39,12 +40,22 @@ FRED_ENTITY_TYPES = {
 
 SERIES_META = {
     "GDP":        {"name": "US GDP",                         "unit": "billions of USD", "direction": "higher_is_better"},
-    "CPIAUCSL":   {"name": "CPI inflation",                  "unit": "index",           "direction": "neutral"},
+    "CPIAUCSL":   {"name": "CPI inflation",                  "unit": "index points",    "direction": "neutral"},
     "UNRATE":     {"name": "unemployment rate",              "unit": "%",               "direction": "lower_is_better"},
     "FEDFUNDS":   {"name": "federal funds rate",             "unit": "%",               "direction": "neutral"},
     "GS10":       {"name": "10-year Treasury yield",         "unit": "%",               "direction": "neutral"},
     "T10YIE":     {"name": "10-year inflation expectations", "unit": "%",               "direction": "neutral"},
     "NASDAQCOM":  {"name": "NASDAQ Composite",               "unit": "points",          "direction": "higher_is_better"},
+}
+
+_Z_THRESHOLD = {
+    "GDP":        999,   # disable entirely — GDP always trends up
+    "NASDAQCOM":  999,   # disable entirely — index always trends up
+    "CPIAUCSL":   999,   # disable — use pct_yoy instead
+    "FEDFUNDS":   2.0,
+    "GS10":       2.0,
+    "T10YIE":     2.0,
+    "UNRATE":     2.0,
 }
 
 
@@ -61,6 +72,21 @@ def fetch_fred(series_id: str) -> list[dict]:
     resp.raise_for_status()
     return resp.json().get("observations", [])
 
+def rolling_stats(valid_observations: list[dict], years: int = 10) -> tuple[float, float]:
+    if not valid_observations:
+        return 0.0, 0.0
+    cutoff = (
+        datetime.strptime(valid_observations[-1]["date"], "%Y-%m-%d").date()
+        - timedelta(days=years * 365)
+    )
+    window = [
+        obs["value"] for obs in valid_observations
+        if datetime.strptime(obs["date"], "%Y-%m-%d").date() >= cutoff
+    ]
+    if len(window) < 2:
+        window = [obs["value"] for obs in valid_observations]
+    return statistics.mean(window), statistics.stdev(window) if len(window) > 1 else 0.0
+
 
 
 def analyze_fred(series_id: str, observations: list[dict]) -> dict:
@@ -76,7 +102,6 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
     latest   = valid_observations[-1]
     prev     = valid_observations[-2]   if len(valid_observations) >= 2  else None
     
-    from datetime import datetime
     latest_date = datetime.strptime(latest["date"], "%Y-%m-%d").date()
     
     year_ago = None
@@ -86,6 +111,8 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
         if days_diff >= 365:
             year_ago = obs
             break
+
+    mean_val, stdev_val = rolling_stats(valid_observations, years=10)
 
     return {
         "series_id":                     series_id,
@@ -97,8 +124,8 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
         "change_year_over_year":         latest["value"] - year_ago["value"]   if year_ago  else None,
         "percent_change_year_over_year": ((latest["value"] - year_ago["value"])
                                           / abs(year_ago["value"])) * 100      if year_ago  else None,
-        "mean":                          statistics.mean(values),
-        "stdev":                         statistics.stdev(values) if len(values) > 1 else 0.0,
+        "mean":                          mean_val,
+        "stdev":                         stdev_val,
         "period_high":                   max(values),
         "period_low":                    min(values),
         "observation_count":             len(valid_observations),
@@ -106,34 +133,41 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
 
 
 
-def direction_verb(change: float, direction: str) -> str:
-    if direction == "higher_is_better":
-        return "rose"  if change > 0 else "fell"
-    if direction == "lower_is_better":
-        return "fell"  if change > 0 else "rose"
-    return "rose"      if change > 0 else "fell"
-
-
+def direction_verb(change: float) -> str:
+    if change > 0:  return "rose"
+    if change < 0:  return "fell"
+    return "was unchanged"
 
 def build_body(stats: dict) -> str:
     meta      = stats["meta"]
     name      = meta["name"]
     unit      = meta["unit"]
-    direction = meta["direction"]
     latest    = stats["latest"]
     sentences = []
 
-    sentences.append(
-        f"The {name} was {latest['value']:,.2f} {unit} as of {latest['date']}."
-    )
+    if stats["series_id"] == "CPIAUCSL" and stats["percent_change_year_over_year"] is not None:
+        sentences.append(
+            f"Consumer prices rose {stats['percent_change_year_over_year']:.1f}% year-over-year as of {latest['date']}, "
+            f"based on a CPI index level of {latest['value']:,.2f}."
+        )
+    else:
+        sentences.append(
+            f"The {name} was {latest['value']:,.2f} {unit} as of {latest['date']}."
+        )
 
     if stats["change_short_term"] is not None:
-        verb = direction_verb(stats["change_short_term"], direction)
-        sign = "+" if stats["change_short_term"] > 0 else ""
-        sentences.append(
-            f"The {name} {verb} by {sign}{stats['change_short_term']:.2f} {unit} "
-            f"from the prior period ({stats['prev']['date']})."
-        )
+        change = stats["change_short_term"]
+        if abs(change) < 1e-9:
+            sentences.append(
+                f"The {name} was unchanged from the prior period ({stats['prev']['date']})."
+            )
+        else:
+            verb = direction_verb(change)
+            sign = "+" if change > 0 else ""
+            sentences.append(
+                f"The {name} {verb} by {sign}{change:.2f} {unit} "
+                f"from the prior period ({stats['prev']['date']})."
+            )
 
     if stats["change_year_over_year"] is not None:
         sign     = "+" if stats["change_year_over_year"] > 0 else ""
@@ -151,13 +185,14 @@ def build_body(stats: dict) -> str:
         f"{rel} its historical average of {stats['mean']:,.2f}."
     )
 
+    threshold = _Z_THRESHOLD.get(stats["series_id"], 2.0)
     if stats["stdev"] > 0:
-        z = (stats["latest"]["value"] - stats["mean"]) / stats["stdev"]
-        if abs(z) > 2:
+        z = (latest["value"] - stats["mean"]) / stats["stdev"]
+        if abs(z) > threshold:
             extreme = "high" if z > 0 else "low"
             sentences.append(
-                f"At {abs(z):.1f} standard deviations from the mean, "
-                f"this {name} reading is unusually {extreme} historically."
+                f"At {abs(z):.1f} standard deviations from its 10-year mean, "
+                f"the {name} is at an unusually {extreme} level."
             )
 
     return " ".join(sentences)
@@ -199,6 +234,9 @@ def load_all_fred() -> list["FinancialDoc"]:
             raw = fetch_fred(series_id)
             doc = normalize_fred(series_id, raw)
             docs.append(doc)
+            logger.info(f"[FRED] {doc.title}")
+            logger.info(f"  → {doc.body}\n")
         except Exception as e:
+            logger.error(f"[FRED] {series_id} failed: {e}")
             raise RuntimeError(f"Error processing {series_id}: {str(e)}") from e
     return docs
