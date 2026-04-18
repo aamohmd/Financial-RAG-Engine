@@ -24,10 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 
-EQUITY_TICKERS = [
-    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN",
-    "META", "TSLA", "JPM", "GS", "SPY",
-]
+from .config import TICKER_REGISTRY
 
 YFINANCE_SUBTYPES = {
     "profile":  "equity_profile",
@@ -419,7 +416,10 @@ def normalize_yfinance(ticker: str, ticker_obj: yf.Ticker) -> list[FinancialDoc]
 
 
 
-def load_all_yfinance(tickers: list[str] = EQUITY_TICKERS) -> list[FinancialDoc]:
+def load_all_yfinance(tickers: list[str] = None) -> list[FinancialDoc]:
+    if tickers is None:
+        tickers = [t for t, cfg in TICKER_REGISTRY.items() if cfg.tier == 1]
+
     all_docs = []
     for ticker in tickers:
         try:
