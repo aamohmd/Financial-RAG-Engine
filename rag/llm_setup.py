@@ -14,10 +14,10 @@ class OpenRouterEmbedding(BaseEmbedding):
     def __init__(self, model_name: str, api_key: str, **kwargs: Any) -> None:
         super().__init__(model_name=model_name, api_key=api_key, **kwargs)
 
-    def _get_query_embedding(self, query: str) -> List[float]:
-        return self._get_text_embedding(query)
+    def get_query_embedding(self, query: str) -> List[float]:
+        return self.get_text_embedding(query)
 
-    def _get_text_embedding(self, text: str) -> List[float]:
+    def get_text_embedding(self, text: str) -> List[float]:
         res = requests.post(
             "https://openrouter.ai/api/v1/embeddings",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -27,11 +27,11 @@ class OpenRouterEmbedding(BaseEmbedding):
             raise ValueError(f"OpenRouter Error: {res}")
         return res["data"][0]["embedding"]
     
-    async def _aget_query_embedding(self, query: str) -> List[float]:
-        return self._get_query_embedding(query)
+    async def aget_query_embedding(self, query: str) -> List[float]:
+        return self.get_query_embedding(query)
     
-    async def _aget_text_embedding(self, text: str) -> List[float]:
-        return self._get_text_embedding(text)
+    async def aget_text_embedding(self, text: str) -> List[float]:
+        return self.get_text_embedding(text)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -55,7 +55,6 @@ def init_llms():
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    # LLM — unchanged
     Settings.llm = OpenAILike(
         model=openrouter_model,
         api_key=openrouter_api_key,
@@ -63,7 +62,6 @@ def init_llms():
         is_chat_model=True
     )
 
-    # Embedding — Bulletproof OpenRouter custom class
     Settings.embed_model = OpenRouterEmbedding(
         model_name=embed_model_name,
         api_key=openrouter_api_key
