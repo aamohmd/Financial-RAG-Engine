@@ -1,61 +1,182 @@
 """
 FRED Macro-Economic Data Ingestion Pipeline
 ===========================================
-Fetches raw numerical time-series from FRED and synthesizes the full historical data 
-into a current "State of the World" narrative for LLM RAG indexing. 
+Fetches raw numerical time-series from FRED and synthesizes the full historical data
+into a current "State of the World" narrative for LLM RAG indexing.
 
 Pipeline Stages:
-1. Fetching: Downloads the entire timeline to enable multi-decade statistical context.
-2. Analysis: Computes historical averages, standard deviations, and accurate YoY changes.
+1. Fetching:      Downloads the entire timeline to enable multi-decade statistical context.
+2. Analysis:      Computes rolling 10-year averages, standard deviations, and YoY changes.
 3. NLP Generation: Synthesizes dense natural language sentences mapping math to text.
 4. Normalization: Packages the final narrative into a unified FinancialDoc interface.
 """
 
 import os
-import statistics
 import logging
 import requests
+import statistics
 from pathlib import Path
 from datetime import datetime, timedelta
-
 from dotenv import load_dotenv
+
 from .models import FinancialDoc
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-logger = logging.getLogger(__name__)
-
+logger       = logging.getLogger(__name__)
 FRED_API_KEY = os.getenv("FRED_API_KEY")
 FRED_BASE    = "https://api.stlouisfed.org/fred"
 
+
 FRED_ENTITY_TYPES = {
-    "GDP":        "macro",    # Total US economic output
-    "CPIAUCSL":   "macro",    # Consumer price inflation
-    "UNRATE":     "macro",    # Unemployment rate
-    "FEDFUNDS":   "rate",     # Federal funds overnight rate
-    "GS10":       "rate",     # 10-Year Treasury yield (monthly)
-    "T10YIE":     "rate",     # Market-implied 10-year inflation expectations
-    "NASDAQCOM":  "index",    # NASDAQ Composite — market sentiment
+    "GDP":             "macro",
+    "A191RL1Q225SBEA": "macro",
+    "DPCERL1Q225SBEA": "macro",
+    "A006RL1Q225SBEA": "macro",
+    "PI":              "macro",
+    "PCE":             "macro",
+    "PSAVERT":         "macro",
+    "CP":              "macro",
+    "CPIAUCSL":        "macro",
+    "UNRATE":          "macro",
+    "FEDFUNDS":        "rate",
+    "GS10":            "rate",
+    "T10YIE":          "rate",
+    "NASDAQCOM":       "index",
 }
 
 SERIES_META = {
-    "GDP":        {"name": "US GDP",                         "unit": "billions of USD", "direction": "higher_is_better"},
-    "CPIAUCSL":   {"name": "CPI inflation",                  "unit": "index points",    "direction": "neutral"},
-    "UNRATE":     {"name": "unemployment rate",              "unit": "%",               "direction": "lower_is_better"},
-    "FEDFUNDS":   {"name": "federal funds rate",             "unit": "%",               "direction": "neutral"},
-    "GS10":       {"name": "10-year Treasury yield",         "unit": "%",               "direction": "neutral"},
-    "T10YIE":     {"name": "10-year inflation expectations", "unit": "%",               "direction": "neutral"},
-    "NASDAQCOM":  {"name": "NASDAQ Composite",               "unit": "points",          "direction": "higher_is_better"},
+    "GDP":             {"name": "US GDP",                         "unit": "billions of USD", "direction": "higher_is_better"},
+    "A191RL1Q225SBEA": {"name": "Real GDP growth rate",           "unit": "%",               "direction": "higher_is_better"},
+    "DPCERL1Q225SBEA": {"name": "Real PCE growth rate",           "unit": "%",               "direction": "higher_is_better"},
+    "A006RL1Q225SBEA": {"name": "Real Investment growth rate",    "unit": "%",               "direction": "higher_is_better"},
+    "PI":              {"name": "Personal income",                "unit": "billions of USD", "direction": "higher_is_better"},
+    "PCE":             {"name": "Personal consumption",           "unit": "billions of USD", "direction": "higher_is_better"},
+    "PSAVERT":         {"name": "Personal saving rate",           "unit": "%",               "direction": "neutral"},
+    "CP":              {"name": "Corporate profits",              "unit": "billions of USD", "direction": "higher_is_better"},
+    "CPIAUCSL":        {"name": "CPI inflation",                  "unit": "index points",    "direction": "neutral"},
+    "UNRATE":          {"name": "unemployment rate",              "unit": "%",               "direction": "lower_is_better"},
+    "FEDFUNDS":        {"name": "federal funds rate",             "unit": "%",               "direction": "neutral"},
+    "GS10":            {"name": "10-year Treasury yield",         "unit": "%",               "direction": "neutral"},
+    "T10YIE":          {"name": "10-year inflation expectations", "unit": "%",               "direction": "neutral"},
+    "NASDAQCOM":       {"name": "NASDAQ Composite",               "unit": "points",          "direction": "higher_is_better"},
 }
 
-_Z_THRESHOLD = {
-    "GDP":        999,   # disable entirely — GDP always trends up
-    "NASDAQCOM":  999,   # disable entirely — index always trends up
-    "CPIAUCSL":   999,   # disable — use pct_yoy instead
-    "FEDFUNDS":   2.0,
-    "GS10":       2.0,
-    "T10YIE":     2.0,
-    "UNRATE":     2.0,
+class RegimeSignals:
+    __slots__ = ("value", "pct_yoy")
+
+    def __init__(self, value: float, pct_yoy: float | None):
+        self.value   = value
+        self.pct_yoy = pct_yoy
+
+
+
+Z_THRESHOLDS = {
+    "GDP":             999,
+    "A191RL1Q225SBEA": 999,
+    "DPCERL1Q225SBEA": 999,
+    "A006RL1Q225SBEA": 999,
+    "PI":              999,
+    "PCE":             999,
+    "CP":              999,
+    "PSAVERT":         2.0,
+    "NASDAQCOM":       999,
+    "CPIAUCSL":        999,
+    "FEDFUNDS":        2.0,
+    "GS10":            2.0,
+    "T10YIE":          2.0,
+    "UNRATE":          2.0,
+}
+
+
+FRED_REGIME_RULES: dict[str, dict[str, callable]] = {
+
+    "A191RL1Q225SBEA": {
+        "strong_growth":   lambda s: s.value >  3.0,
+        "moderate_growth": lambda s: 1.0 <= s.value <= 3.0,
+        "stagnation":      lambda s: 0.0 <= s.value <  1.0,
+        "contraction":     lambda s: s.value <  0.0,
+    },
+
+    "DPCERL1Q225SBEA": {
+        "strong_consumption":        lambda s: s.value >  3.0,
+        "moderate_consumption":      lambda s: 0.0 <= s.value <= 3.0,
+        "consumption_contraction":   lambda s: s.value <  0.0,
+    },
+
+    "A006RL1Q225SBEA": {
+        "investment_expansion":      lambda s: s.value >  5.0,
+        "moderate_investment":       lambda s: 0.0 <= s.value <= 5.0,
+        "investment_contraction":    lambda s: s.value <  0.0,
+    },
+
+    "GDP": {
+        "strong_growth":   lambda s: s.pct_yoy is not None and s.pct_yoy >  5.0,
+        "moderate_growth": lambda s: s.pct_yoy is not None and 2.0 <= s.pct_yoy <= 5.0,
+        "stagnation":      lambda s: s.pct_yoy is not None and 0.0 <= s.pct_yoy <  2.0,
+        "contraction":     lambda s: s.pct_yoy is not None and s.pct_yoy <  0.0,
+    },
+
+    "PI": {
+        "strong_income_growth":    lambda s: s.pct_yoy is not None and s.pct_yoy >  4.0,
+        "moderate_income_growth":  lambda s: s.pct_yoy is not None and 0.0 <= s.pct_yoy <= 4.0,
+        "income_contraction":      lambda s: s.pct_yoy is not None and s.pct_yoy <  0.0,
+    },
+
+    "PCE": {
+        "strong_consumption":       lambda s: s.pct_yoy is not None and s.pct_yoy >  5.0,
+        "moderate_consumption":     lambda s: s.pct_yoy is not None and 1.0 <= s.pct_yoy <= 5.0,
+        "weak_consumption":         lambda s: s.pct_yoy is not None and s.pct_yoy <  1.0,
+    },
+
+    "CP": {
+        "profit_expansion":    lambda s: s.pct_yoy is not None and s.pct_yoy >  5.0,
+        "stable_profits":      lambda s: s.pct_yoy is not None and 0.0 <= s.pct_yoy <= 5.0,
+        "profit_contraction":  lambda s: s.pct_yoy is not None and s.pct_yoy <  0.0,
+    },
+
+    "CPIAUCSL": {
+        "high_inflation":      lambda s: s.pct_yoy is not None and s.pct_yoy >  4.0,
+        "elevated_inflation":  lambda s: s.pct_yoy is not None and 2.0 < s.pct_yoy <= 4.0,
+        "stable_prices":       lambda s: s.pct_yoy is not None and 0.0 <= s.pct_yoy <= 2.0,
+        "deflation":           lambda s: s.pct_yoy is not None and s.pct_yoy <  0.0,
+    },
+
+    "UNRATE": {
+        "full_employment":  lambda s: s.value <  4.5,
+        "tight_labor":      lambda s: 4.5 <= s.value <= 6.0,
+        "slack_labor":      lambda s: s.value >  6.0,
+    },
+
+    "FEDFUNDS": {
+        "restrictive":    lambda s: s.value >  4.0,
+        "neutral":        lambda s: 2.0 <= s.value <= 4.0,
+        "accommodative":  lambda s: s.value <  2.0,
+    },
+
+    "GS10": {
+        "high_yield_environment":  lambda s: s.value >  4.5,
+        "neutral_yield":           lambda s: 2.0 <= s.value <= 4.5,
+        "low_yield_environment":   lambda s: s.value <  2.0,
+    },
+
+    "T10YIE": {
+        "elevated_expectations":  lambda s: s.value >  3.0,
+        "moderate_expectations":  lambda s: 1.5 <= s.value <= 3.0,
+        "anchored_expectations":  lambda s: s.value <  1.5,
+    },
+
+    "NASDAQCOM": {
+        "bull_market":     lambda s: s.pct_yoy is not None and s.pct_yoy >  20.0,
+        "neutral_market":  lambda s: s.pct_yoy is not None and -10.0 <= s.pct_yoy <= 20.0,
+        "bear_market":     lambda s: s.pct_yoy is not None and s.pct_yoy < -10.0,
+    },
+
+    "PSAVERT": {
+        "elevated_savings": lambda s: s.value >  8.0,
+        "normal_savings":   lambda s: 4.0 <= s.value <= 8.0,
+        "low_savings":      lambda s: s.value <  4.0,
+    },
 }
 
 
@@ -64,13 +185,14 @@ def fetch_fred(series_id: str) -> list[dict]:
         f"{FRED_BASE}/series/observations",
         params={
             "series_id": series_id,
-            "api_key": FRED_API_KEY,
+            "api_key":   FRED_API_KEY,
             "file_type": "json",
         },
         timeout=30,
     )
     resp.raise_for_status()
     return resp.json().get("observations", [])
+
 
 def rolling_stats(valid_observations: list[dict], years: int = 10) -> tuple[float, float]:
     if not valid_observations:
@@ -88,7 +210,6 @@ def rolling_stats(valid_observations: list[dict], years: int = 10) -> tuple[floa
     return statistics.mean(window), statistics.stdev(window) if len(window) > 1 else 0.0
 
 
-
 def analyze_fred(series_id: str, observations: list[dict]) -> dict:
     valid_observations = [
         {"date": obs["date"], "value": float(obs["value"])}
@@ -98,21 +219,23 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
     if not valid_observations:
         raise ValueError(f"No valid observations for {series_id}")
 
-    values   = [obs["value"] for obs in valid_observations]
-    latest   = valid_observations[-1]
-    prev     = valid_observations[-2]   if len(valid_observations) >= 2  else None
-    
+    values      = [obs["value"] for obs in valid_observations]
+    latest      = valid_observations[-1]
+    prev        = valid_observations[-2] if len(valid_observations) >= 2 else None
     latest_date = datetime.strptime(latest["date"], "%Y-%m-%d").date()
-    
+
     year_ago = None
     for obs in reversed(valid_observations[:-1]):
-        obs_date = datetime.strptime(obs["date"], "%Y-%m-%d").date()
-        days_diff = (latest_date - obs_date).days
-        if days_diff >= 365:
+        if (latest_date - datetime.strptime(obs["date"], "%Y-%m-%d").date()).days >= 365:
             year_ago = obs
             break
 
     mean_val, stdev_val = rolling_stats(valid_observations, years=10)
+
+    change_yoy  = (latest["value"] - year_ago["value"]) if year_ago else None
+    pct_yoy     = (change_yoy / abs(year_ago["value"]) * 100) if (
+                    change_yoy is not None and year_ago and year_ago["value"] != 0
+                  ) else None
 
     return {
         "series_id":                     series_id,
@@ -120,10 +243,9 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
         "latest":                        latest,
         "prev":                          prev,
         "year_ago":                      year_ago,
-        "change_short_term":             latest["value"] - prev["value"]       if prev      else None,
-        "change_year_over_year":         latest["value"] - year_ago["value"]   if year_ago  else None,
-        "percent_change_year_over_year": ((latest["value"] - year_ago["value"])
-                                          / abs(year_ago["value"])) * 100      if year_ago  else None,
+        "change_short_term":             (latest["value"] - prev["value"]) if prev else None,
+        "change_year_over_year":         change_yoy,
+        "percent_change_year_over_year": pct_yoy,
         "mean":                          mean_val,
         "stdev":                         stdev_val,
         "period_high":                   max(values),
@@ -132,22 +254,23 @@ def analyze_fred(series_id: str, observations: list[dict]) -> dict:
     }
 
 
-
 def direction_verb(change: float) -> str:
     if change > 0:  return "rose"
     if change < 0:  return "fell"
     return "was unchanged"
 
+
 def build_body(stats: dict) -> str:
-    meta      = stats["meta"]
-    name      = meta["name"]
-    unit      = meta["unit"]
-    latest    = stats["latest"]
+    meta    = stats["meta"]
+    name    = meta["name"]
+    unit    = meta["unit"]
+    latest  = stats["latest"]
     sentences = []
 
     if stats["series_id"] == "CPIAUCSL" and stats["percent_change_year_over_year"] is not None:
         sentences.append(
-            f"Consumer prices rose {stats['percent_change_year_over_year']:.1f}% year-over-year as of {latest['date']}, "
+            f"Consumer prices rose {stats['percent_change_year_over_year']:.1f}% "
+            f"year-over-year as of {latest['date']}, "
             f"based on a CPI index level of {latest['value']:,.2f}."
         )
     else:
@@ -178,14 +301,14 @@ def build_body(stats: dict) -> str:
             f"({pct_sign}{stats['percent_change_year_over_year']:.1f}%)."
         )
 
-    diff = stats["latest"]["value"] - stats["mean"]
+    diff = latest["value"] - stats["mean"]
     rel  = "above" if diff > 0 else "below"
     sentences.append(
         f"The current {name} reading sits {abs(diff):,.2f} {unit} "
         f"{rel} its historical average of {stats['mean']:,.2f}."
     )
 
-    threshold = _Z_THRESHOLD.get(stats["series_id"], 2.0)
+    threshold = Z_THRESHOLDS.get(stats["series_id"], 2.0)
     if stats["stdev"] > 0:
         z = (latest["value"] - stats["mean"]) / stats["stdev"]
         if abs(z) > threshold:
@@ -198,8 +321,19 @@ def build_body(stats: dict) -> str:
     return " ".join(sentences)
 
 
+def classify_fred_regime(series_id: str, value: float, pct_yoy: float | None) -> str:
+    rules   = FRED_REGIME_RULES.get(series_id, {})
+    signals = RegimeSignals(value=value, pct_yoy=pct_yoy)
+    for regime_label, condition in rules.items():
+        try:
+            if condition(signals):
+                return regime_label
+        except Exception:
+            continue
+    return "unclassified"
 
-def normalize_fred(series_id: str, raw: list[dict]) -> "FinancialDoc":
+
+def normalize_fred(series_id: str, raw: list[dict]) -> FinancialDoc:
     stats = analyze_fred(series_id, raw)
     body  = build_body(stats)
     meta  = stats["meta"]
@@ -211,6 +345,12 @@ def normalize_fred(series_id: str, raw: list[dict]) -> "FinancialDoc":
         date        = stats["latest"]["date"],
         title       = f"{meta['name']} — {stats['latest']['date']}",
         body        = body,
+        tags        = ["macro", "fred", series_id.lower()],
+        regime      = classify_fred_regime(
+                          series_id,
+                          stats["latest"]["value"],
+                          stats["percent_change_year_over_year"],
+                      ),
         meta        = {
             "unit":                          meta["unit"],
             "latest_value":                  stats["latest"]["value"],
@@ -226,17 +366,14 @@ def normalize_fred(series_id: str, raw: list[dict]) -> "FinancialDoc":
     )
 
 
-
-def load_all_fred() -> list["FinancialDoc"]:
+def load_all_fred() -> list[FinancialDoc]:
     docs = []
     for series_id in FRED_ENTITY_TYPES:
         try:
             raw = fetch_fred(series_id)
             doc = normalize_fred(series_id, raw)
             docs.append(doc)
-            logger.info(f"[FRED] {doc.title}")
-            logger.info(f"  → {doc.body}\n")
+            logger.info("[FRED] %s → regime: %s", doc.title, doc.regime)
         except Exception as e:
-            logger.error(f"[FRED] {series_id} failed: {e}")
-            raise RuntimeError(f"Error processing {series_id}: {str(e)}") from e
+            logger.error("[FRED] %s failed: %s", series_id, e)
     return docs

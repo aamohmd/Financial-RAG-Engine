@@ -1,5 +1,4 @@
 fastapi[standard]
-uvicorn
 llama-index-core
 llama-index-llms-openai-like
 fastembed
@@ -8,3 +7,7 @@ python-dotenv
 psycopg2-binary
 sqlalchemy
 pgvector
+requests
+yfinance
+edgartools
+hishel<0.1.0
