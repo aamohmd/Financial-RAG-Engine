@@ -3,6 +3,8 @@ from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, 
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import VECTOR
 
+DB_EMBEDDING_DIM = 2048
+
 DB_USER = os.getenv("DB_USER")
 DB_PASS = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
@@ -22,7 +24,7 @@ financial_documents = Table(
     Column("document_title", String(255), nullable=False),
     Column("content", Text, nullable=False),                         # sentence (embedded)
     Column("window_text", Text),                                     # ±2 surrounding sentences
-    Column("embedding", VECTOR(4096)),
+    Column("embedding", VECTOR(DB_EMBEDDING_DIM)),
     Column("entity", String(20), index=True),                        # "GDP", "CPIAUCSL", "AAPL"
     Column("entity_type", String(20), index=True),                   # "macro", "equity", "rate", "index"
     Column("source", String(20), index=True),                        # "fred", "bea", "sec", etc.
