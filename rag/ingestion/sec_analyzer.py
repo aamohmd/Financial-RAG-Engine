@@ -56,9 +56,9 @@ ITEM_MAP = {
         "Item 3":   "legal",
     },
     "10-Q": {
-        "Item 2":   "mda",
-        "Item 3":   "quantitative_risk",
-        "Item 1":   "legal",
+        "Part I, Item 2":   "mda",
+        "Part I, Item 3":   "quantitative_risk",
+        "Part II, Item 1":  "legal",
     },
 }
 

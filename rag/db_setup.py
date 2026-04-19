@@ -1,5 +1,6 @@
 import os
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, Text, Date, DateTime, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import VECTOR
 
 DB_USER = os.getenv("DB_USER")
@@ -17,11 +18,16 @@ financial_documents = Table(
     "financial_documents",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("chunk_hash", String(64), unique=True, nullable=False),
     Column("document_title", String(255), nullable=False),
-    Column("content", Text, nullable=False),
+    Column("content", Text, nullable=False),                         # sentence (embedded)
+    Column("window_text", Text),                                     # ±2 surrounding sentences
     Column("embedding", VECTOR(4096)),
-    Column("company_ticker", String(10)),
-    Column("report_date", Date),
+    Column("entity", String(20), index=True),                        # "GDP", "CPIAUCSL", "AAPL"
+    Column("entity_type", String(20), index=True),                   # "macro", "equity", "rate", "index"
+    Column("source", String(20), index=True),                        # "fred", "bea", "sec", etc.
+    Column("report_date", Date, index=True),
+    Column("metadata", JSONB, server_default="{}"),
     Column("created_at", DateTime, server_default=func.now()),
 )
 
