@@ -40,16 +40,16 @@ class Chunk:
     chunk_hash:     str
     meta:           dict = field(default_factory=dict)
 
-_ABBREVS = r"\b(Mr|Mrs|Ms|Dr|Prof|Inc|Corp|Ltd|Co|Jr|Sr|vs|etc|approx|est|vol|avg|no)\."
-_SENT_END = re.compile(
+ABBREVS_PATTERN = r"\b(Mr|Mrs|Ms|Dr|Prof|Inc|Corp|Ltd|Co|Jr|Sr|vs|etc|approx|est|vol|avg|no)\."
+SENT_END_RE = re.compile(
     r"(?<=[.!?])"
     r"\s+"
     r"(?=[A-Z\"])"
 )
 
 def split_into_sentences(text: str) -> list[str]:
-    protected = re.sub(_ABBREVS, r"\1<DOT>", text)
-    parts = _SENT_END.split(protected)
+    protected = re.sub(ABBREVS_PATTERN, r"\1<DOT>", text)
+    parts = SENT_END_RE.split(protected)
     return [s.replace("<DOT>", ".").strip() for s in parts if len(s.strip()) >= 15]
 
 
