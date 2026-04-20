@@ -410,11 +410,9 @@ def normalize_transcript(
     return docs
 
 def load_all_transcripts(
-    tickers:             list[str] | None = None,
-    quarters_per_ticker: int              = 8,
+    tickers:             list[str],
+    quarters_per_ticker: int = 8,
 ) -> list[FinancialDoc]:
-    if tickers is None:
-        tickers = [t for t, cfg in TICKER_REGISTRY.items() if cfg.tier == 1]
     all_docs = []
     for ticker in tickers:
         if ticker in NO_TRANSCRIPT_TICKERS: continue

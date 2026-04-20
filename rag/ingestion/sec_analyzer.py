@@ -141,9 +141,7 @@ def normalize_sec(ticker: str, form_type: str = "10-K") -> list[FinancialDoc]:
     return docs
 
 
-def load_all_sec(tickers: list = None) -> list[FinancialDoc]:
-    if tickers is None:
-        tickers = [t for t, cfg in TICKER_REGISTRY.items() if cfg.tier == 1]
+def load_all_sec(tickers: list[str]) -> list[FinancialDoc]:
 
     all_docs = []
     for ticker in tickers:

@@ -24,6 +24,14 @@ from llama_index.core import Settings
 from db_setup import engine, financial_documents
 from .models import FinancialDoc
 
+# Dynamic analyzer imports
+from .fred_analyzer import load_all_fred
+from .yfinance_analyzer import load_all_yfinance
+from .sec_analyzer import load_all_sec
+from .transcript_analyzer import load_all_transcripts
+from .news_analyzer import load_all_news
+from .config import TICKER_REGISTRY
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -168,3 +176,47 @@ def store_in_db(embedded_chunks: list[tuple[Chunk, list[float]]]) -> int:
     with engine.begin() as conn:
         result = conn.execute(stmt)
         return result.rowcount or 0
+
+def orchestrate_ingestion():
+    logger.info("Starting Full Ingestion Orchestrator...")
+    source_stats = {}
+    
+    # Explicitly gather Tier 1 tickers
+    tickers = [t for t, cfg in TICKER_REGISTRY.items() if cfg.tier == 1]
+    logger.info("Ingesting for tickers: %s", ", ".join(tickers))
+
+    # Sources list - loaders now require explicit ticker list
+    sources = [
+        ("fred",       load_all_fred),
+        ("yfinance",   lambda: load_all_yfinance(tickers)),
+        ("sec",        lambda: load_all_sec(tickers)),
+        ("transcript", lambda: load_all_transcripts(tickers)),
+        ("news",       lambda: load_all_news(tickers)),
+    ]
+
+    for source_name, loader_fn in sources:
+        try:
+            logger.info(f"Processing Source: {source_name.upper()}")
+            docs = loader_fn()
+            if not docs:
+                logger.info(f"  No new documents found for {source_name}")
+                source_stats[source_name] = 0
+                continue
+                
+            all_chunks = []
+            for doc in docs:
+                all_chunks.extend(list(chunk_with_sentence_window(doc)))
+            
+            logger.info(f"  Generated {len(all_chunks)} chunks for {source_name}")
+            
+            embedded = embed_chunks(all_chunks)
+            inserted = store_in_db(embedded)
+            
+            source_stats[source_name] = inserted
+            logger.info(f"  Successfully stored {inserted} chunks for {source_name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to ingest source {source_name}: {e}")
+            source_stats[source_name] = -1
+
+    return source_stats

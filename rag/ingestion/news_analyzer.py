@@ -380,11 +380,9 @@ def normalize_news_article(
     )
 
 def load_all_news(
-    tickers:  list[str] | None = None,
-    days_back: int             = 90,
+    tickers:  list[str],
+    days_back: int = 90,
 ) -> list[FinancialDoc]:
-    if tickers is None:
-        tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META"]
 
     all_raw  = []
     all_docs = []
