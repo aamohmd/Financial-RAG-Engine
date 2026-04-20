@@ -11,3 +11,4 @@ requests
 yfinance
 edgartools
 hishel<0.1.0
+sentence-transformers
