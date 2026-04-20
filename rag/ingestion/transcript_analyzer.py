@@ -54,7 +54,7 @@ FMP_KEY  = os.getenv("FMP_API_KEY")
 FMP_BASE = "https://financialmodelingprep.com/api/v3"
 SEC_ID   = os.getenv("SEC_EDGAR_IDENTITY", "admin@financial-rag.com")
 
-_NO_TRANSCRIPT_TICKERS = frozenset({
+NO_TRANSCRIPT_TICKERS = frozenset({
     "SPY", "QQQ", "DIA", "IWM", "GLD", "TLT", "HYG",
     "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLRE", "XLB", "XLC",
 })
@@ -417,7 +417,7 @@ def load_all_transcripts(
         tickers = [t for t, cfg in TICKER_REGISTRY.items() if cfg.tier == 1]
     all_docs = []
     for ticker in tickers:
-        if ticker in _NO_TRANSCRIPT_TICKERS: continue
+        if ticker in NO_TRANSCRIPT_TICKERS: continue
         try:
             raw_list = fetch_transcripts_from_8k(ticker, n=quarters_per_ticker)
             if not raw_list: continue

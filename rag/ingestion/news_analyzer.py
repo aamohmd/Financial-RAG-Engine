@@ -154,7 +154,7 @@ RECENCY_WEIGHTS: dict[str, float] = {
     "general":           0.4,
 }
 
-_NO_NEWS_TICKERS = frozenset({
+NO_NEWS_TICKERS = frozenset({
     "SPY", "QQQ", "DIA", "IWM",
     "XLK", "XLF", "XLE", "XLV", "XLI",
     "XLY", "XLP", "XLU", "XLRE", "XLB", "XLC",
@@ -390,12 +390,12 @@ def load_all_news(
     all_docs = []
 
     for ticker in tickers:
-        if ticker in _NO_NEWS_TICKERS:
+        if ticker in NO_NEWS_TICKERS:
             continue
         try:
             articles = fetch_ticker_news(ticker, days_back=days_back)
             for a in articles:
-                a["_primary_ticker"] = ticker
+                a["primary_ticker"] = ticker
             all_raw.extend(articles)
             logger.info("[News] %s → %d raw articles", ticker, len(articles))
         except Exception as e:
@@ -405,7 +405,7 @@ def load_all_news(
     try:
         market_articles = fetch_market_news(days_back=min(days_back, 7))
         for a in market_articles:
-            a["_primary_ticker"] = None
+            a["primary_ticker"] = None
         all_raw.extend(market_articles)
         logger.info("[News] Market feed → %d raw articles", len(market_articles))
     except Exception as e:
@@ -420,7 +420,7 @@ def load_all_news(
     for article in relevant:
         doc = normalize_news_article(
             article        = article,
-            primary_ticker = article.pop("_primary_ticker", None),
+            primary_ticker = article.pop("primary_ticker", None),
         )
         if doc:
             all_docs.append(doc)
