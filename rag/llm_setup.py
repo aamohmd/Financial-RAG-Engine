@@ -22,24 +22,34 @@ class OpenRouterEmbedding(BaseEmbedding):
     def __init__(self, model_name: str, api_key: str, **kwargs: Any) -> None:
         super().__init__(model_name=model_name, api_key=api_key, **kwargs)
 
-    def get_query_embedding(self, query: str) -> List[float]:
-        return self.get_text_embedding(query)
+    @classmethod
+    def class_name(cls) -> str:
+        return "OpenRouterEmbedding"
 
-    def get_text_embedding(self, text: str) -> List[float]:
+    def _get_query_embedding(self, query: str) -> List[float]:
+        return self._get_text_embedding(query)
+
+    def _get_text_embedding(self, text: str) -> List[float]:
+        return self._get_text_embeddings([text])[0]
+
+    def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         res = requests.post(
             "https://openrouter.ai/api/v1/embeddings",
             headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": self.model_name, "input": [text]}
+            json={"model": self.model_name, "input": texts}
         ).json()
         if "data" not in res or not res["data"]:
             raise ValueError(f"OpenRouter Error: {res}")
-        return res["data"][0]["embedding"]
-    
-    async def aget_query_embedding(self, query: str) -> List[float]:
-        return self.get_query_embedding(query)
-    
-    async def aget_text_embedding(self, text: str) -> List[float]:
-        return self.get_text_embedding(text)
+        return [item["embedding"] for item in res["data"]]
+
+    async def _aget_query_embedding(self, query: str) -> List[float]:
+        return self._get_query_embedding(query)
+
+    async def _aget_text_embedding(self, text: str) -> List[float]:
+        return self._get_text_embedding(text)
+
+    async def _aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return self._get_text_embeddings(texts)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
