@@ -175,19 +175,34 @@ Signal extraction:
 - Macro relevance flag
 - Tickers mentioned extracted directly from Polygon list-of-strings payload
 
+Entity types:
+- `news_equity` — ticker-specific company news
+- `news_macro` — Fed, economic data, macro events (no primary ticker)
+- `news_market` — broad market news
+
 Recency weighting:
 - Event-specific weights are embedded in metadata as `recency_weight`
 - Intended retrieval behavior: combine semantic score with event weight and time decay
+
+Resilience:
+- All fetch functions have a `_retries=3` depth limit to prevent infinite recursion on persistent 429 rate limits
 
 ---
 
 ## 3) Active Universe Control
 
-Ticker universe is governed by `TickerConfig` / `TICKER_REGISTRY`.
+Ticker universe is governed by `TickerConfig` / `TICKER_REGISTRY` in `ingestion/config.py`.
 
-Current active tier-1 ticker set in this repo is intentionally constrained (AAPL enabled). Additional tickers exist as commented presets and can be activated explicitly.
+Current active tier-1 tickers (10):
+- **Technology:** AAPL, MSFT, NVDA, GOOGL
+- **Consumer/Cyclical:** AMZN, TSLA
+- **Communication Services:** META
+- **Financial Services:** JPM, GS
+- **Index:** SPY
 
-Operational rule: data-source loaders should default to tier-1 tickers when no explicit ticker list is provided.
+ETF/index tickers (SPY) are automatically excluded from SEC filings, transcripts, and news ingestion where they are not applicable.
+
+Operational rule: data-source loaders default to tier-1 tickers when no explicit ticker list is provided. New tickers can be added by inserting a `TickerConfig(tier=1, sector="...")` entry.
 
 ---
 
@@ -264,8 +279,8 @@ Design intent:
 ## 7) Known Caveats (Current State)
 
 - News relevance currently uses title-noise + summary-length filters; deeper ticker-specific salience scoring is a future enhancement.
-- Some ingestion pipeline methods in shared ingestion module are placeholders and require full production wiring for embedding/store orchestration.
-- API ingest/query endpoints are scaffolded and not yet final end-to-end production paths.
+- News deduplication uses MD5 hashing (sufficient for dedup but not cryptographically aligned with the SHA-256 used elsewhere).
+- Earnings transcript ingestion relies on the free 8-K exhibit path; full interactive Q&A requires FMP Premium (planned).
 
 ---
 

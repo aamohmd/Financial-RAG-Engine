@@ -1,227 +1,200 @@
-# 🧠 Advanced Financial RAG Engine
+# Financial RAG Engine
 
-A production-grade Retrieval-Augmented Generation pipeline purpose-built for financial document Q&A. Ask natural-language questions about SEC filings, earnings reports, and financial news — the engine retrieves the most relevant passages from a pgvector-powered document store and synthesizes precise, grounded answers.
+A production-grade **Retrieval-Augmented Generation** system for financial analysis. Query SEC filings, earnings transcripts, macroeconomic data, and financial news through a natural language interface powered by a 6-stage hybrid retrieval pipeline.
 
-**This is not a wrapper around an API.** The pipeline implements a multi-stage NLP pipeline, each stage solving a specific retrieval or ranking problem, orchestrated end-to-end in Python.
+## Architecture
 
-> 🚧 **Work in Progress** — Stages 1–3 of the query pipeline are fully implemented. Ingestion, reranking, synthesis, and Airflow orchestration are on the roadmap.
-
----
-
-### 🔍 Query Pipeline (RAG Search)
 ```
 User Question
      │
      ▼
-┌─────────────────────────────────────────────────────────┐
-│  Stage 1 · Query Rewriting                     ✅ DONE  │
-│  LLM rewrites conversational questions into precise     │
-│  financial search queries with tickers, fiscal periods, │
-│  and domain terminology (revenue, EPS, gross margin)    │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│  Stage 2 · HyDE (Hypothetical Document Embedding)       │
-│  LLM generates a hypothetical SEC-style passage that    │ ✅ DONE
-│  would answer the query. This passage is embedded       │
-│  instead of the question — achieving ~0.85-0.92 cosine  │
-│  similarity vs ~0.60-0.72 for raw question embedding    │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│  Stage 3 · Hybrid Retrieval (Vector + BM25 + RRF)       │
-│  Runs two parallel searches:                            │
-│    • pgvector cosine similarity (<=>)  on the HyDE      │ ✅ DONE
-│      embedding                                          │
-│    • ParadeDB BM25 full-text search (@@@) on the        │
-│      rewritten query text                               │
-│  Merges both ranked lists via Reciprocal Rank Fusion    │
-│  (k=60) → top-k candidates                              │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│  Stage 4 · Sentence-Window Expansion           🔜 TODO  │
-│  Each retrieved sentence is replaced with its ±2        │
-│  surrounding sentences (stored at ingestion time).      │
-│  Gives the reranker and LLM full paragraph context      │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│  Stage 5 · Cross-Encoder Reranking             🔜 TODO  │
-│  ms-marco-MiniLM-L-6-v2 scores each candidate against  │
-│  the ORIGINAL question (not the rewritten query).       │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│  Stage 6 · LLM Synthesis                       🔜 TODO  │
-│  Refines top passages into a structured answer.         │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                   QUERY PIPELINE                       │
+│                                                        │
+│  1. Contextual Query Builder (conversation-aware)      │
+│  2. Query Rewriter (LLM-optimized search terms)        │
+│  3. HyDE (Hypothetical Document Embedding)             │
+│  4. Hybrid Search (Vector + BM25 via RRF fusion)       │
+│  5. HF Reranker (BGE-Reranker-v2-M3 via Inference API) │
+│  6. Financial Synthesis (cite-backed expert answer)    │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+     │
+     ▼
+  Expert Analysis with Source Citations
 ```
 
-### ⚙️ Data Ingestion Pipeline (Planned)
-```
-  ┌───────────────┐      ┌─────────────────┐      ┌───────────────┐
-  │  SEC Filings  │      │  Earnings Calls │      │ Financial News│
-  └───────┬───────┘      └────────┬────────┘      └───────┬───────┘
-          │                       │                       │
-          ▼                       ▼                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                Apache Airflow (DAG Orchestrator)     🔜 TODO    │
-│  • Scheduling  • Retries  • Monitoring  • Parallel Ingestion    │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  FastAPI /rag/ingest Endpoint        🔜 TODO    │
-│  • PDF Parsing  • Text Chunking  • Sentence-Window Processing   │
-│  • Embedding Generation  • pgvector Storage                     │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Data Sources
 
----
+| Source | Type | Coverage | Documents/Ticker |
+|--------|------|----------|-----------------|
+| **FRED** | Macro indicators | GDP, CPI, FEDFUNDS, unemployment, 14 series total | 1 per series |
+| **yFinance** | Equity fundamentals | Profile, income, balance sheet, cash flow, price | 5 per ticker |
+| **SEC EDGAR** | 10-K / 10-Q filings | Business, risk factors, MD&A, legal, market risk | Up to 5 sections × 2 forms |
+| **Earnings** | 8-K exhibits | Prepared remarks, CFO financials, Q&A, full text | Up to 4 sections × 8 quarters |
+| **News** | Polygon.io | Ticker-specific + market-wide, 90-day lookback | Up to 50 per ticker |
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-| Component | Technology | Why |
-|---|---|---|
-| **API Framework** | FastAPI + Uvicorn | Async, auto-generated docs, Pydantic validation |
-| **Vector Database** | PostgreSQL + pgvector | HNSW indexing, cosine distance operator (`<=>`), co-located with relational data |
-| **Full-Text Search** | ParadeDB BM25 (`@@@` operator) | Production-grade BM25 ranking built directly into Postgres — no external search engine |
-| **RAG Orchestration** | LlamaIndex Core | Query transforms, prompt templates, embedding pipelines |
-| **LLM** | OpenRouter API (configurable free-tier model) | Top free reasoning model for finance on OpenRouter |
-| **Embeddings** | OpenRouter API (`nvidia/llama-nemotron-embed-vl-1b-v2:free`) | Cloud-based embedding generation, 4096-dim vectors, free tier |
-| **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` *(planned)* | 23M param cross-encoder trained on MS MARCO |
-| **Orchestration** | Apache Airflow *(planned)* | Orchestrating ingestion pipelines (SEC, news, earnings) |
-| **Containerization** | Docker + Docker Compose | One-command deployment |
+| Layer | Technology |
+|-------|------------|
+| **LLM** | OpenRouter → Nvidia Nemotron 120B (free tier) |
+| **Embeddings** | Nvidia Llama-Nemotron-Embed 1B (2048-dim, free tier) |
+| **Reranker** | HuggingFace Inference API → BGE-Reranker-v2-M3 |
+| **Database** | ParadeDB (PostgreSQL + pgvector + BM25) |
+| **Backend** | FastAPI + SQLAlchemy (Optimized CPU-only stack) |
+| **Frontend** | React + Vite |
+| **Infrastructure** | Docker Compose
 
----
+## Quick Start
 
-## 📂 Project Structure
+### Prerequisites
+- Docker & Docker Compose
+- API keys: [OpenRouter](https://openrouter.ai/), [FRED](https://fred.stlouisfed.org/docs/api/api_key.html), [Polygon.io](https://polygon.io/)
 
-```
-.
-├── docker-compose.yml          # ParadeDB (pgvector + BM25) + FastAPI backend
-├── Dockerfile                  # Python 3.11 slim image
-├── Makefile                    # Shortcuts: make up, make build, make clean
-├── requirements.txt
-├── main.py                     # (placeholder)
-├── .env.example                # Environment variable template
-│
-├── dags/                       # (planned) Airflow DAGs for ingestion
-│
-├── rag/
-│   ├── llm_setup.py            # LLM + embedding init via OpenRouter
-│   ├── query_rewriter.py       # Stage 1 — query optimization
-│   ├── hyde.py                 # Stage 2 — hypothetical document embedding
-│   ├── hybrid_search.py        # Stage 3 — vector + BM25 + RRF fusion
-│   ├── db_setup.py             # SQLAlchemy engine, table schema, BM25 index init
-│   └── api.py                  # FastAPI app + REST endpoints
-│
-└── db/
-    └── init.sql                # Schema: financial_documents + pgvector extension
-```
-
----
-
-## 🗄️ Database Schema
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE financial_documents (
-    id               SERIAL PRIMARY KEY,
-    document_title   VARCHAR(255) NOT NULL,
-    content          TEXT NOT NULL,
-    embedding        halfvec(4096),
-    company_ticker   VARCHAR(10),
-    report_date      DATE,
-    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- BM25 index for full-text search (ParadeDB)
-CREATE INDEX documents_bm25
-    ON financial_documents
-    USING bm25 (id, content)
-    WITH (key_field = 'id');
-```
-
-> **Note:** The database runs on [ParadeDB](https://www.paradedb.com/) — a Postgres-native search engine that provides real BM25 ranking via the `@@@` operator, eliminating the need for a separate Elasticsearch/Solr instance.
-
----
-
-## 🚀 Quick Start
+### 1. Clone & Configure
 
 ```bash
-# 1. Clone and configure
-git clone https://github.com/aamohmd/Financial-RAG-Engine.git
+git clone https://github.com/YOUR_USERNAME/Financial-RAG-Engine.git
 cd Financial-RAG-Engine
+
 cp .env.example .env
-# Add your OPENROUTER_API_KEY
-
-# 2. Start services (ParadeDB + FastAPI)
-make build
-# or: docker compose up --build
-
-# 3. Test the pipeline (query rewrite → HyDE → hybrid search)
-curl -X POST http://localhost:8080/test
-
-# 4. Health check
-curl http://localhost:8080/docs   # Swagger UI
+# Edit .env with your API keys
 ```
 
----
+### 2. Launch
 
-## 🔑 Key Design Decisions
+```bash
+docker compose up --build
+```
 
-### Why HyDE instead of direct question embedding?
-Raw questions like *"How did Apple do last quarter?"* have low cosine similarity (~0.60) to financial documents. HyDE generates a hypothetical SEC-style passage first, then embeds *that* — boosting similarity to ~0.85-0.92 against real filings.
+This starts three services:
+- **FastAPI backend** → `http://localhost:8080`
+- **React frontend** → `http://localhost:5173`
+- **ParadeDB** → `localhost:5432`
 
-### Why hybrid search instead of vector-only?
-Vector search excels at semantic similarity but misses exact financial terms (ticker symbols, specific dollar amounts). BM25 catches these. Reciprocal Rank Fusion merges both ranked lists without tuning weights.
+### 3. Ingest Data
 
-### Why ParadeDB instead of PostgreSQL tsvector?
-ParadeDB provides true BM25 scoring natively inside Postgres via the `@@@` operator, matching the ranking quality of dedicated search engines. Standard `tsvector` + `ts_rank` uses a simpler TF-IDF-like metric that lacks BM25's term-frequency saturation and document-length normalization.
+```bash
+# Ingest all data sources
+curl -X POST http://localhost:8080/rag/ingest
 
-### Why OpenRouter?
-OpenRouter provides access to top-tier LLMs and embedding models through a single API with generous free tiers. This keeps the project zero-cost for development while allowing easy model switching (just change an env var).
+# OR ingest a specific source (fred, sec, yfinance, transcript, news)
+curl -X POST http://localhost:8080/rag/ingest?source=fred
+```
 
-### Why sentence-window ingestion? *(planned)*
-Embedding individual sentences gives precise retrieval. But a single sentence lacks context for the reranker and LLM. Sentence-window stores ±2 surrounding sentences in metadata, swapped in at retrieval time — best of both worlds.
+### 4. Query
 
-### Why rerank against the original question? *(planned)*
-The rewritten query is optimized for *retrieval* (maximize recall). But the user's actual intent might be subtly different. The cross-encoder scores each candidate against the *original* question to ensure the final answer addresses what was actually asked.
+Open `http://localhost:5173` and ask questions like:
+- *"What was Apple's revenue last quarter?"*
+- *"Did NVIDIA beat earnings estimates?"*
+- *"What is the current federal funds rate and how does it compare to historical averages?"*
 
----
+## Project Structure
 
-## 📝 API Reference
+```
+Financial-RAG-Engine/
+├── rag/
+│   ├── api.py                  # FastAPI endpoints (/rag/query, /rag/ingest)
+│   ├── llm_setup.py            # LLM + embedding + reranker initialization
+│   ├── db_setup.py             # PostgreSQL/pgvector schema definition
+│   ├── query_rewriter.py       # Stage 2: LLM query optimization
+│   ├── hyde.py                 # Stage 3: Hypothetical Document Embedding
+│   ├── hybrid_search.py        # Stage 4: Vector + BM25 + RRF fusion
+│   ├── reranker.py             # Stage 5: Cross-encoder reranking
+│   ├── contextual_query.py     # Stage 1: Conversation history integration
+│   ├── synthesis.py            # Stage 6: Financial answer synthesis
+│   └── ingestion/
+│       ├── ingestion.py        # Orchestrator + chunking + embedding + storage
+│       ├── config.py           # Ticker universe registry
+│       ├── models.py           # FinancialDoc data contract
+│       ├── fred_analyzer.py    # FRED macro data pipeline
+│       ├── yfinance_analyzer.py# Equity fundamentals pipeline
+│       ├── sec_analyzer.py     # SEC EDGAR filing parser
+│       ├── transcript_analyzer.py  # Earnings call/press release parser
+│       └── news_analyzer.py    # Polygon.io news pipeline
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx             # Terminal-style chat interface
+│   │   ├── main.jsx            # React entry point
+│   │   └── ragchat.css         # Dark theme terminal UI
+│   └── Dockerfile
+├── db/
+│   └── init.sql                # Database schema initialization
+├── docker-compose.yml          # 3-service orchestration
+├── Dockerfile                  # Backend container
+├── requirements.txt            # Python dependencies
+├── FINANCE_LOGIC.md            # Data logic specification
+└── PLAN.md                     # Future roadmap
+```
 
-| Endpoint | Method | Status | Description |
-|---|---|---|---|
-| `/docs` | GET | ✅ | Swagger UI |
-| `/test` | POST | ✅ | End-to-end test: rewrite → HyDE → hybrid search |
-| `/rag/query` | POST | 🔜 | Run full pipeline on a question |
-| `/rag/ingest` | POST | 🔜 | Ingest documents into pgvector |
+## API Reference
 
-### POST `/test` (currently working)
-Runs the implemented pipeline stages end-to-end with a hardcoded NVDA query for testing.
+### `POST /rag/query`
 
----
+```json
+{
+  "question": "What is Apple's current P/E ratio?",
+  "history": [
+    {"role": "user", "content": "Tell me about AAPL"},
+    {"role": "assistant", "content": "Apple Inc. is a technology company..."}
+  ]
+}
+```
 
-## 🗺️ Roadmap
+**Response:**
+```json
+{
+  "answer": "Based on the latest yFinance data...",
+  "metadata": {
+    "rewritten_query": "AAPL trailing P/E ratio 2025",
+    "sources_count": 6,
+    "history_turns_used": 2
+  }
+}
+```
 
-- [x] **Query Rewriting** — LLM-powered query optimization for financial search
-- [x] **HyDE** — Hypothetical Document Embedding for improved vector retrieval
-- [x] **Hybrid Search** — Vector (pgvector) + BM25 (ParadeDB) with RRF fusion
-- [x] **Database Setup** — ParadeDB with pgvector extension, SQLAlchemy ORM
-- [x] **Docker Deployment** — One-command setup with Docker Compose
-- [ ] **Document Ingestion Pipeline** — PDF parsing, sentence-window chunking, embedding + storage
-- [ ] **Cross-Encoder Reranking** — ms-marco-MiniLM-L-6-v2 for precision re-scoring
-- [ ] **LLM Synthesis** — Structured answer generation from top passages
-- [ ] **Full `/rag/query` Endpoint** — Wire all 6 stages into a single API call
-- [ ] **Apache Airflow Integration** — Orchestrate automated SEC filing and news ingestion
-- [ ] **Multi-Vector Retrieval** — Table and image embeddings in financial reports
+### `POST /rag/ingest`
+
+Triggers the data ingestion orchestrator.
+
+**Query Parameters:**
+- `source` (optional): The specific data source to ingest (`fred`, `yfinance`, `sec`, `transcript`, or `news`). If omitted, all sources are ingested.
+
+**Response:** Returns a map of sources to the number of new chunks successfully embedded and stored.
+
+### `GET /health`
+
+Health check endpoint for container orchestration.
+
+## Key Design Decisions
+
+- **Sentence-window chunking**: Each sentence is embedded individually, but ±2 surrounding sentences are stored as `window_text` for richer synthesis context
+- **HyDE**: Generates a hypothetical answer to embed, improving vector search recall for financial queries
+- **Reciprocal Rank Fusion (RRF)**: Merges vector similarity and BM25 keyword results with `k=60`, capturing both semantic meaning and exact financial tokens
+- **Regime classification**: Every document is tagged with an economic/market regime label for state-aware reasoning
+- **Idempotent ingestion**: SHA-256 chunk hashing ensures re-runs never duplicate data
+
+## Environment Variables
+
+See [`.env.example`](.env.example) for the full list. Key variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENROUTER_API_KEY` | ✅ | LLM and embedding API access |
+| `HF_API_KEY` | ✅ | HuggingFace Inference API (for reranking) |
+| `FRED_API_KEY` | ✅ | Federal Reserve economic data |
+| `POLYGON_API_KEY` | ✅ | Financial news data |
+| `SEC_EDGAR_IDENTITY` | ✅ | Your email (SEC fair access policy) |
+| `DB_USER` / `DB_PASSWORD` | ✅ | PostgreSQL credentials |
+
+## Roadmap
+
+- **Apache Airflow integration** — Scheduled DAGs for automated daily/weekly data ingestion across all sources (FRED, yFinance, SEC, transcripts, news), replacing the current manual `/rag/ingest` trigger
+- Causal linkage graphs between macro indicators for multi-hop reasoning
+- Cross-entity narrative synthesis (pre-computed "Macro vs Market" overview docs)
+- FMP Premium transcript integration for full Q&A session coverage
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
