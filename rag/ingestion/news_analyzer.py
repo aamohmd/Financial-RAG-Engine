@@ -191,6 +191,7 @@ def fetch_ticker_news(
     ticker:     str,
     days_back:  int = 90,
     limit:      int = 50,
+    _retries:   int = 3,
 ) -> list[dict]:
     published_after = (
         datetime.now(timezone.utc) - timedelta(days=days_back)
@@ -209,13 +210,16 @@ def fetch_ticker_news(
         timeout=20,
     )
     if resp.status_code == 429:
-        logger.warning("[News] Rate limited — sleeping 15s")
+        if _retries <= 0:
+            logger.error("[News] %s: max retries exceeded on 429", ticker)
+            return []
+        logger.warning("[News] Rate limited — sleeping 15s (%d retries left)", _retries)
         time.sleep(15)
-        return fetch_ticker_news(ticker, days_back, limit)
+        return fetch_ticker_news(ticker, days_back, limit, _retries - 1)
     resp.raise_for_status()
     return resp.json().get("results", [])
 
-def fetch_market_news(days_back: int = 7, limit: int = 50) -> list[dict]:
+def fetch_market_news(days_back: int = 7, limit: int = 50, _retries: int = 3) -> list[dict]:
     published_after = (
         datetime.now(timezone.utc) - timedelta(days=days_back)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -232,9 +236,12 @@ def fetch_market_news(days_back: int = 7, limit: int = 50) -> list[dict]:
         timeout=20,
     )
     if resp.status_code == 429:
-        logger.warning("[News] Rate limited on market feed — sleeping 15s")
+        if _retries <= 0:
+            logger.error("[News] Market feed: max retries exceeded on 429")
+            return []
+        logger.warning("[News] Rate limited on market feed — sleeping 15s (%d retries left)", _retries)
         time.sleep(15)
-        return fetch_market_news(days_back, limit)
+        return fetch_market_news(days_back, limit, _retries - 1)
     resp.raise_for_status()
     return resp.json().get("results", [])
 

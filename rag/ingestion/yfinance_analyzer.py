@@ -79,7 +79,7 @@ def period_label(df: pd.DataFrame, col_idx: int = 0) -> str:
     try:
         return pd.Timestamp(df.columns[col_idx]).strftime("%Y-%m-%d")
     except Exception:
-        return "unknown"
+        return datetime.now().strftime("%Y-%m-%d")
 
 
 

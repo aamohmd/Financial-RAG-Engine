@@ -52,7 +52,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 logger   = logging.getLogger(__name__)
 FMP_KEY  = os.getenv("FMP_API_KEY")
 FMP_BASE = "https://financialmodelingprep.com/api/v3"
-SEC_ID   = os.getenv("SEC_EDGAR_IDENTITY", "admin@financial-rag.com")
+SEC_ID   = os.getenv("SEC_EDGAR_IDENTITY", "your_email@example.com")
 
 NO_TRANSCRIPT_TICKERS = frozenset({
     "SPY", "QQQ", "DIA", "IWM", "GLD", "TLT", "HYG",
@@ -331,7 +331,7 @@ def fetch_transcripts_from_8k(ticker: str, n: int = 8) -> list[dict]:
         logger.error("[8-K] %s fetch failed: %s", ticker, e)
         return []
 
-def fetch_latest_transcripts(ticker: str, n: int = 8) -> list[dict]:
+def fetch_latest_transcripts(ticker: str, n: int = 8, _retries: int = 3) -> list[dict]:
     resp = requests.get(
         f"{FMP_BASE}/earning_call_transcript/{ticker}",
         params={"apikey": FMP_KEY},
@@ -341,9 +341,12 @@ def fetch_latest_transcripts(ticker: str, n: int = 8) -> list[dict]:
         logger.error("[Transcript] 403 (Tier Restriction) - FMP Transcript API requires paid plan")
         return []
     if resp.status_code == 429:
-        logger.warning("[Transcript] Rate limited, retrying in 60s")
+        if _retries <= 0:
+            logger.error("[Transcript] %s: max retries exceeded on 429", ticker)
+            return []
+        logger.warning("[Transcript] Rate limited, retrying in 60s (%d retries left)", _retries)
         time.sleep(60)
-        return fetch_latest_transcripts(ticker, n)
+        return fetch_latest_transcripts(ticker, n, _retries - 1)
     resp.raise_for_status()
     data = resp.json()
     return data[:n] if isinstance(data, list) else []

@@ -13,6 +13,7 @@ Pipeline Stages:
 
 import os
 import logging
+import time
 import requests
 import statistics
 from pathlib import Path
@@ -181,7 +182,16 @@ FRED_REGIME_RULES: dict[str, dict[str, callable]] = {
 
 
 def fetch_fred(series_id: str) -> list[dict]:
-    resp = requests.get(
+    session = requests.Session()
+    # Retry on 500, 502, 503, 504
+    retries = requests.adapters.Retry(
+        total=5,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504]
+    )
+    session.mount("https://", requests.adapters.HTTPAdapter(max_retries=retries))
+    
+    resp = session.get(
         f"{FRED_BASE}/series/observations",
         params={
             "series_id": series_id,
@@ -374,6 +384,7 @@ def load_all_fred() -> list[FinancialDoc]:
             doc = normalize_fred(series_id, raw)
             docs.append(doc)
             logger.info("[FRED] %s → regime: %s", doc.title, doc.regime)
+            time.sleep(0.5)
         except Exception as e:
             logger.error("[FRED] %s failed: %s", series_id, e)
     return docs

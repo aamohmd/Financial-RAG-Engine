@@ -5,6 +5,7 @@ Fetches company 10-K and 10-Q filings via edgartools and converts
 them into FinancialDoc objects ready for chunking and embedding.
 """
 
+import os
 import logging
 from dataclasses import dataclass
 from edgar import Company, set_identity
@@ -14,7 +15,7 @@ from .config import TICKER_REGISTRY
 
 logger = logging.getLogger(__name__)
 
-set_identity("antigravity@financialrag.com")
+set_identity(os.getenv("SEC_EDGAR_IDENTITY", "your_email@example.com"))
 
 
 
@@ -46,7 +47,7 @@ SECTION_REGIME_RULES = {
 }
 
 
-# Maps edgartools item keys to your section_key registry
+# Maps edgartools parser keys to your section_key registry
 ITEM_MAP = {
     "10-K": {
         "Item 1":   "business",
@@ -141,10 +142,15 @@ def normalize_sec(ticker: str, form_type: str = "10-K") -> list[FinancialDoc]:
     return docs
 
 
-def load_all_sec(tickers: list[str]) -> list[FinancialDoc]:
+ETF_EXCLUSION = {"SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "VEU", "BND"}
 
+def load_all_sec(tickers: list[str]) -> list[FinancialDoc]:
     all_docs = []
     for ticker in tickers:
+        if ticker in ETF_EXCLUSION:
+            logger.info("[SEC] Skipping ETF: %s", ticker)
+            continue
+
         for form_type in ["10-K", "10-Q"]:
             try:
                 docs = normalize_sec(ticker, form_type)

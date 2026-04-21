@@ -177,15 +177,13 @@ def store_in_db(embedded_chunks: list[tuple[Chunk, list[float]]]) -> int:
         result = conn.execute(stmt)
         return result.rowcount or 0
 
-def orchestrate_ingestion():
+def orchestrate_ingestion(target_source: str = None):
     logger.info("Starting Full Ingestion Orchestrator...")
     source_stats = {}
-    
-    # Explicitly gather Tier 1 tickers
+
     tickers = [t for t, cfg in TICKER_REGISTRY.items() if cfg.tier == 1]
     logger.info("Ingesting for tickers: %s", ", ".join(tickers))
 
-    # Sources list - loaders now require explicit ticker list
     sources = [
         ("fred",       load_all_fred),
         ("yfinance",   lambda: load_all_yfinance(tickers)),
@@ -193,6 +191,12 @@ def orchestrate_ingestion():
         ("transcript", lambda: load_all_transcripts(tickers)),
         ("news",       lambda: load_all_news(tickers)),
     ]
+
+    if target_source:
+        sources = [s for s in sources if s[0] == target_source]
+        if not sources:
+            logger.error("Source %s not found in registry", target_source)
+            return {}
 
     for source_name, loader_fn in sources:
         try:
