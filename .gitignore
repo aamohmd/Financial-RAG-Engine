@@ -20,6 +20,7 @@ frontend/.vite/
 
 # Data
 data/
+.flashrank_cache/
 
 # macOS
 .DS_Store
