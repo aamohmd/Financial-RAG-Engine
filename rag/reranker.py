@@ -1,23 +1,40 @@
+import os
 import logging
-from llm_setup import get_reranker
+import requests
 
 logger = logging.getLogger(__name__)
+
+HF_API_URL = "https://router.huggingface.co/hf-inference/models"
+HF_API_KEY = os.getenv("HF_API_KEY", "")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+
+
+def hf_rerank(query: str, documents: list[str]) -> list[float]:
+    resp = requests.post(
+        f"{HF_API_URL}/{RERANKER_MODEL}",
+        headers={"Authorization": f"Bearer {HF_API_KEY}"},
+        json={"inputs": {"source_sentence": query, "sentences": documents}},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def to_dict(row) -> dict:
     if isinstance(row, dict):
-        return dict(row)
+        return row
+
+    asdict_fn = getattr(row, "_asdict", None)
+    if callable(asdict_fn):
+        return asdict_fn()
 
     row_keys = getattr(row, "keys", None)
-    if callable(row_keys):
+    if row_keys:
+        keys = list(row_keys() if callable(row_keys) else row_keys)
         try:
-            keys = list(row_keys())
-            try:
-                return {key: row[key] for key in keys}
-            except Exception:
-                return {key: getattr(row, key) for key in keys}
+            return {key: row[key] for key in keys}
         except Exception:
-            pass
+            return {key: getattr(row, key) for key in keys}
 
     return {"value": str(row)}
 
@@ -79,33 +96,32 @@ def rerank_results(question: str, rows: list, final_k: int = 5) -> list:
     if len(rows) <= final_k:
         return rows
 
-    reranker = get_reranker()
-    if reranker is None:
-        return rows[:final_k]
+    if not HF_API_KEY:
+        logger.warning("HF_API_KEY not set — skipping reranker, using retrieval order")
+        return [to_dict(r) for r in rows[:final_k]]
 
     documents = [format_row(row) for row in rows]
-    pairs = [[question, doc] for doc in documents]
 
     try:
-        scores = reranker.predict(pairs)
+        scores = hf_rerank(question, documents)
     except Exception as e:
-        logger.error("Reranker model call failed: %s", e)
-        return rows[:final_k]
+        logger.error("Reranker API failed: %s — using retrieval order", e)
+        return [to_dict(r) for r in rows[:final_k]]
 
-    if hasattr(scores, "tolist"):
-        scores = scores.tolist()
+    if not isinstance(scores, list) or len(scores) != len(rows):
+        logger.error("Reranker returned unexpected shape — using retrieval order")
+        return [to_dict(r) for r in rows[:final_k]]
 
-    scored = []
-    for i, score in enumerate(scores):
-        score_value = score[0] if isinstance(score, (list, tuple)) else score
-        scored.append({"index": i, "score": float(score_value)})
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    scored = sorted(
+        enumerate(scores),
+        key=lambda x: float(x[1]),
+        reverse=True,
+    )
 
     top = []
-    for item in scored[:final_k]:
-        row_dict = to_dict(rows[item["index"]])
-        row_dict["rerank_score"] = item["score"]
+    for idx, score in scored[:final_k]:
+        row_dict = to_dict(rows[idx])
+        row_dict["rerank_score"] = float(score)
         top.append(row_dict)
 
     return top

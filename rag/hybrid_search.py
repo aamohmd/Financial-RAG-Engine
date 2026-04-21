@@ -1,13 +1,11 @@
-from sqlalchemy import select, cast, func, text
-from pgvector.sqlalchemy import Vector
+from sqlalchemy import select, cast, func, text, Float
+from pgvector.sqlalchemy import HALFVEC, HalfVector
 from db_setup import engine, financial_documents
 
 def vector_search(embedding, top_k: int = 5):
     distance = (
-        financial_documents.c.embedding.op("<=>")
-        (cast(embedding, Vector))
-        .label("distance")
-    )
+        financial_documents.c.embedding.op("<=>")(HalfVector(embedding))
+    ).cast(Float).label("distance")
 
     stmt = (
         select(

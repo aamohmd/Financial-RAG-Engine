@@ -9,7 +9,6 @@ terminology, include realistic figures, mention fiscal periods,
 and write in the formal style of investor relations documents.
 
 Question: {question}
-Ticker context: {ticker}
 
 Hypothetical passage:"""
 

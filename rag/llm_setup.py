@@ -8,12 +8,11 @@ import os
 import logging
 from pathlib import Path
 
-try:
-    from sentence_transformers import CrossEncoder
-except Exception:
-    CrossEncoder = None
-
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
 
 class OpenRouterEmbedding(BaseEmbedding):
     model_name: str
@@ -51,40 +50,6 @@ class OpenRouterEmbedding(BaseEmbedding):
     async def _aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         return self._get_text_embeddings(texts)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
-
-rerankerModel: Any = None
-
-
-def get_reranker():
-    global rerankerModel
-
-    model_name = os.getenv("RERANKER_MODEL")
-    if not model_name:
-        raise ValueError("Missing required environment variable: RERANKER_MODEL")
-
-    if rerankerModel is not None:
-        return rerankerModel
-
-    if CrossEncoder is None:
-        logger.error(
-            "sentence-transformers is not installed; reranker disabled and fallback order will be used"
-        )
-        return None
-
-    try:
-        rerankerModel = CrossEncoder(
-            model_name,
-            trust_remote_code=True,
-            max_length=512,
-        )
-        logger.info("Loaded reranker model: %s", model_name)
-        return rerankerModel
-    except Exception as e:
-        logger.error("Failed loading reranker model '%s': %s", model_name, e)
-        rerankerModel = None
-        return None
 
 def init_llms():
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
