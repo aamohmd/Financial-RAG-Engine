@@ -1,7 +1,6 @@
 fastapi[standard]
 llama-index-core
 llama-index-llms-openai-like
-fastembed
 llama-index-embeddings-openai
 python-dotenv
 psycopg2-binary
@@ -11,4 +10,3 @@ requests
 yfinance
 edgartools
 hishel<0.1.0
-sentence-transformers

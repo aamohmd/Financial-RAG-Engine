@@ -1,31 +1,23 @@
-# Environment
-.env
-.env.local
-.venv
-.conda
+.git/
+.gitignore
 
-# Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+
+.venv/
+venv/
+.conda/
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Node
+scratch/
+
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Data
-data/
-
-# macOS
 .DS_Store
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo

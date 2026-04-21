@@ -3,15 +3,33 @@ services:
     build: .
     ports:
       - "8080:8080"
+    env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
       - DB_HOST=db
+      - FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
     volumes:
       - .:/app
-    command: ["fastapi", "dev", "rag/api.py", "--port", "8080", "--host", "0.0.0.0"]
+    command: ["uvicorn", "api:app", "--reload", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
       db:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API=http://localhost:8080
+    volumes:
+      - ./frontend:/frontend
+      - frontend_node_modules:/frontend/node_modules
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    depends_on:
+      fastapi:
+        condition: service_started
 
   db:
     image: paradedb/paradedb:latest
@@ -33,3 +51,4 @@ services:
 
 volumes:
   postgres_data:
+  frontend_node_modules:
