@@ -228,8 +228,11 @@ Operational rule: data-source loaders default to tier-1 tickers when no explicit
 
 ---
 
-## 5) Retrieval Fusion Logic
+---
 
+## 5) Retrieval and Ranking Logic
+
+### 5.1 Hybrid Search Fusion
 Hybrid retrieval merges:
 - Vector search (`<=>`) against embeddings
 - BM25 keyword search (`@@@`) against text content
@@ -239,13 +242,10 @@ Fusion method:
 - Constant: `RRF_K = 60`
 - Score formula: `sum(1 / (RRF_K + rank_i))`
 
-Candidate sizing:
-- Each branch retrieves `top_k * 3`
-- Final top IDs come from fused ranking
-
-Design intent:
-- Vector branch handles semantic similarity
-- BM25 branch captures exact finance tokens (tickers, metrics, fiscal terms)
+### 5.2 AI Reranking (Local FlashRank)
+The top candidates from the RRF fusion are passed to a local cross-encoder model for high-precision prioritization.
+- **Model**: `ms-marco-TinyBERT-L-2-v2` (via FlashRank)
+- **Logic**: A local CPU-based cross-encoder re-evaluates retrieval candidates against the full user query. This ensures the most salient financial evidence is prioritized for final synthesis without external API dependencies.
 
 ---
 

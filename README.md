@@ -15,7 +15,7 @@ User Question
 │  2. Query Rewriter (LLM-optimized search terms)        │
 │  3. HyDE (Hypothetical Document Embedding)             │
 │  4. Hybrid Search (Vector + BM25 via RRF fusion)       │
-│  5. HF Reranker (BGE-Reranker-v2-M3 via Inference API) │
+│  5. AI Reranking (FlashRank Local CPU Cross-Encoder)   │
 │  6. Financial Synthesis (cite-backed expert answer)    │
 │                                                        │
 └────────────────────────────────────────────────────────┘
@@ -40,7 +40,7 @@ User Question
 |-------|------------|
 | **LLM** | OpenRouter → Nvidia Nemotron 120B (free tier) |
 | **Embeddings** | Nvidia Llama-Nemotron-Embed 1B (2048-dim, free tier) |
-| **Reranker** | HuggingFace Inference API → BGE-Reranker-v2-M3 |
+| **Reranker** | FlashRank (Local CPU Cross-Encoder) |
 | **Database** | ParadeDB (PostgreSQL + pgvector + BM25) |
 | **Backend** | FastAPI + SQLAlchemy (Optimized CPU-only stack) |
 | **Frontend** | React + Vite |
@@ -181,8 +181,7 @@ See [`.env.example`](.env.example) for the full list. Key variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENROUTER_API_KEY` | ✅ | LLM and embedding API access |
-| `HF_API_KEY` | ✅ | HuggingFace Inference API (for reranking) |
+| `OPENROUTER_API_KEY` | ✅ | LLM, Embeddings, and Reranking |
 | `FRED_API_KEY` | ✅ | Federal Reserve economic data |
 | `POLYGON_API_KEY` | ✅ | Financial news data |
 | `SEC_EDGAR_IDENTITY` | ✅ | Your email (SEC fair access policy) |
